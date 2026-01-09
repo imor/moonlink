@@ -4,6 +4,24 @@
 //! in Parquet data files. The index uses a bucket-based hash table with variable-bit
 //! encoding for space efficiency.
 //!
+//! ## Terms
+//!
+//! ### Hash Entry
+//!
+//! A key value pair stored in the index. Also called an entry in short.
+//! The key stored in the entry is the lower bits of the hash of the
+//! original key (primary key). The value is the file id and row id in
+//! the file.
+//!
+//! ### Hash Bucket
+//!
+//! A container for multiple entries. All entries in the bucket have the
+//! same upper half bits of the hash of the key.
+//!
+//! ### Index Block
+//!
+//! An index block contains multiple hash buckets.
+//!
 //! ## Architecture Overview
 //!
 //! ```text
@@ -24,7 +42,7 @@
 //!
 //! ```text
 //! Bucket Array (variable-bit encoding):
-//! [offset_0][offset_1][offset_2]...[offset_N]
+//! [offset_0, offset_1, offset_2, , offset_N]
 //!     │       │       │            │
 //!     v       v       v            v
 //!   Points to entries in the entries section
@@ -36,7 +54,7 @@
 //!
 //! ```text
 //! Entries (variable-bit encoding):
-//! [lower_hash, file_idx, row_idx][lower_hash, file_idx, row_idx]...
+//! [(lower_hash, file_idx, row_idx), (lower_hash, file_idx, row_idx)]...
 //!  │          │        │
 //!  │          │        └─ Which row in the file
 //!  │          └─ Which file (index into files array)
@@ -176,8 +194,8 @@ use tokio_bitstream_io::BigEndian as AsyncBigEndian;
 
 // Constants
 const HASH_BITS: u32 = 64;
-const _MAX_BLOCK_SIZE: u32 = 2 * 1024 * 1024 * 1024; // 2GB
-const _TARGET_NUM_FILES_PER_INDEX: u32 = 4000;
+// const _MAX_BLOCK_SIZE: u32 = 2 * 1024 * 1024 * 1024; // 2GB
+// const _TARGET_NUM_FILES_PER_INDEX: u32 = 4000;
 const INVALID_FILE_ID: u32 = 0xFFFFFFFF;
 
 /// High-quality hash function for distributing keys across buckets.
@@ -302,7 +320,7 @@ impl PartialEq for GlobalIndex {
 
 impl Eq for GlobalIndex {}
 
-/// It's guaranteed every file indice references to different set of data files.
+/// It's guaranteed every file index references to different set of data files.
 impl Hash for GlobalIndex {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.files.hash(state);
@@ -345,16 +363,25 @@ impl Hash for GlobalIndex {
 /// ```
 #[derive(Clone)]
 pub(crate) struct IndexBlock {
+    /// Index of the first bucket (inclusive) in this block
     pub(crate) bucket_start_idx: u32,
+
+    /// Index of the last bucket (exclusive) in this block
     pub(crate) bucket_end_idx: u32,
+
+    /// Byte offset where the buckets array starts
     pub(crate) bucket_start_offset: u64,
+
     /// Local index file path.
     pub(crate) index_file: MooncakeDataFileRef,
+
     /// File size for the index block file, used to decide whether to trigger merge index blocks merge.
     pub(crate) file_size: u64,
+
     /// Mmapped-data.
     /// Synchronous IO is not needed because here we use mmap.
     data: Arc<Option<Mmap>>,
+
     /// Cache handle within object storage cache.
     pub(crate) cache_handle: Option<NonEvictableHandle>,
 }
@@ -408,14 +435,14 @@ impl IndexBlock {
     ///
     /// # Arguments
     ///
-    /// * `metadata` - Global index metadata for bit widths
+    /// * `global_index` - Global index metadata for bit widths
     /// * `file_id_remap` - Maps old file IDs to new file IDs
     fn create_iterator<'a>(
         &'a self,
-        metadata: &'a GlobalIndex,
+        global_index: &'a GlobalIndex,
         file_id_remap: &'a Vec<u32>,
     ) -> IndexBlockIterator<'a> {
-        IndexBlockIterator::new(self, metadata, file_id_remap)
+        IndexBlockIterator::new(self, global_index, file_id_remap)
     }
 
     /// Read bucket metadata for specified bucket indices.
@@ -427,7 +454,7 @@ impl IndexBlock {
     ///
     /// * `bucket_idxs` - Bucket indices to read
     /// * `reader` - Bit reader positioned at bucket array
-    /// * `metadata` - Global index metadata for bucket bit width
+    /// * `global_index` - Global index metadata for bucket bit width
     ///
     /// # Returns
     ///
@@ -437,24 +464,24 @@ impl IndexBlock {
         &self,
         bucket_idxs: &[u32],
         reader: &mut BitReader<Cursor<&[u8]>, BigEndian>,
-        metadata: &GlobalIndex,
+        global_index: &GlobalIndex,
     ) -> Vec<BucketEntry> {
         let mut results = Vec::new();
         for bucket_idx in bucket_idxs {
             reader
                 .seek_bits(SeekFrom::Start(
-                    (bucket_idx * metadata.bucket_bits) as u64 + self.bucket_start_offset,
+                    self.bucket_start_offset + (bucket_idx * global_index.bucket_bits) as u64,
                 ))
                 .unwrap();
             let start = reader
-                .read_unsigned_var::<u32>(metadata.bucket_bits)
+                .read_unsigned_var::<u32>(global_index.bucket_bits)
                 .unwrap();
             let end = reader
-                .read_unsigned_var::<u32>(metadata.bucket_bits)
+                .read_unsigned_var::<u32>(global_index.bucket_bits)
                 .unwrap();
             if start != end {
                 results.push(BucketEntry {
-                    upper_hash: (*bucket_idx as u64) << metadata.hash_lower_bits,
+                    upper_hash: (*bucket_idx as u64) << global_index.hash_lower_bits,
                     entry_start: start,
                     entry_end: end,
                 });
@@ -470,7 +497,7 @@ impl IndexBlock {
     /// # Arguments
     ///
     /// * `reader` - Bit reader positioned at entry
-    /// * `metadata` - Global index metadata for field bit widths
+    /// * `global_index` - Global index metadata for field bit widths
     ///
     /// # Returns
     ///
@@ -479,16 +506,16 @@ impl IndexBlock {
     fn read_entry(
         &self,
         reader: &mut BitReader<Cursor<&[u8]>, BigEndian>,
-        metadata: &GlobalIndex,
+        global_index: &GlobalIndex,
     ) -> (u64, usize, usize) {
         let hash = reader
-            .read_unsigned_var::<u64>(metadata.hash_lower_bits)
+            .read_unsigned_var::<u64>(global_index.hash_lower_bits)
             .unwrap();
         let seg_idx = reader
-            .read_unsigned_var::<u32>(metadata.seg_id_bits)
+            .read_unsigned_var::<u32>(global_index.seg_id_bits)
             .unwrap();
         let row_idx = reader
-            .read_unsigned_var::<u32>(metadata.row_id_bits)
+            .read_unsigned_var::<u32>(global_index.row_id_bits)
             .unwrap();
         (hash, seg_idx as usize, row_idx as usize)
     }
@@ -502,7 +529,7 @@ impl IndexBlock {
     ///
     /// * `value_and_hashes` - Pairs of (original_key, hash) sorted by hash
     /// * `bucket_idxs` - Bucket indices to scan
-    /// * `metadata` - Global index metadata
+    /// * `global_index` - Global index metadata
     ///
     /// # Returns
     ///
@@ -511,15 +538,16 @@ impl IndexBlock {
         &self,
         value_and_hashes: &[(u64, u64)],
         mut bucket_idxs: Vec<u32>,
-        metadata: &GlobalIndex,
+        global_index: &GlobalIndex,
     ) -> Vec<(u64, RecordLocation)> {
         let cursor = Cursor::new(self.data.as_ref().as_ref().unwrap().as_ref());
         let mut reader = BitReader::endian(cursor, BigEndian);
         let mut entry_reader = reader.clone();
         bucket_idxs.dedup();
-        let entries = self.read_buckets(&bucket_idxs, &mut reader, metadata);
+        let bucket_entries = self.read_buckets(&bucket_idxs, &mut reader, global_index);
+
         let mut results = Vec::new();
-        let mut lookup_iter = LookupIterator::new(self, metadata, &mut entry_reader, &entries);
+        let mut lookup_iter = LookupIterator::new(self, global_index, &mut entry_reader, &bucket_entries);
         let mut i = 0;
         let mut lookup_entry = lookup_iter.next();
         while let Some((entry_hash, seg_idx, row_idx)) = lookup_entry {
@@ -530,7 +558,7 @@ impl IndexBlock {
                 let value = value_and_hashes[i].0;
                 results.push((
                     value,
-                    RecordLocation::DiskFile(metadata.files[seg_idx].file_id(), row_idx),
+                    RecordLocation::DiskFile(global_index.files[seg_idx].file_id(), row_idx),
                 ));
             }
             lookup_entry = lookup_iter.next();
@@ -906,7 +934,7 @@ impl GlobalIndex {
 ///
 /// Phase 2: Write bucket array
 /// ┌────────────────────────────────────┐
-/// │ [0][0][2][5][5][8]...              │  ← Bucket offsets
+/// │ [0, 0, 2, 5, 5, 8, ...]            │  ← Bucket offsets
 /// └────────────────────────────────────┘
 ///
 /// Final file structure:
@@ -939,12 +967,30 @@ impl GlobalIndex {
 /// let index_block = builder.build(&metadata).await?;
 /// ```
 struct IndexBlockBuilder {
+    /// First bucket index covered by this index block (inclusive)
     bucket_start_idx: u32,
+
+    /// Last bucket index covered by this index block (exclusive)
     bucket_end_idx: u32,
+
+    /// Offset to the first entry for each bucket in this block.
+    /// Length = (bucket_end_idx - bucket_start_idx).
+    /// Each value points to the entry position where that bucket's entries start.
+    /// Example: [0, 0, 3, 3, 7] means buckets 0-1 are empty, bucket 2 has entries [0,3), etc.
     buckets: Vec<u32>,
+
+    /// Reference to the index file being written
     index_file: MooncakeDataFileRef,
+
+    /// Bit-level writer for variable-bit encoding of entries to disk
     entry_writer: AsyncBitWriter<AsyncFile, AsyncBigEndian>,
+
+    /// The bucket currently being populated with entries.
+    /// Increments when entries move to a new bucket.
     current_bucket: u32,
+
+    /// Total number of entries written so far.
+    /// Used to populate bucket offsets and track progress.
     current_entry: u32,
 }
 
@@ -1030,7 +1076,7 @@ impl IndexBlockBuilder {
     /// ```text
     /// 1. Extract bucket index from upper hash bits
     /// 2. Update bucket offsets for any skipped buckets
-    /// 3. Write entry: [lower_hash][seg_idx][row_idx]
+    /// 3. Write entry: (lower_hash, seg_idx, row_idx)
     /// 4. Return true if buffer needs flushing
     /// ```
     pub fn write_entry(
@@ -1038,24 +1084,48 @@ impl IndexBlockBuilder {
         hash: u64,
         seg_idx: usize,
         row_idx: usize,
-        metadata: &GlobalIndex,
+        global_index: &GlobalIndex,
     ) -> bool {
-        while (hash >> metadata.hash_lower_bits) != self.current_bucket as u64 {
+        // Extract the bucket index by shifting off the lower hash bits.
+        // The upper bits of the hash determine which bucket this entry belongs to.
+        // For example, if hash_lower_bits=20, then hash >> 20 gives us the bucket index.
+        while (hash >> global_index.hash_lower_bits) != self.current_bucket as u64 {
+            // We've skipped to a new bucket that has no entries yet.
+            // Update the bucket offset array to record where the current bucket ends.
+            // Each skipped bucket's offset points to the current entry index,
+            // indicating that the bucket is empty (start == end for that bucket).
             self.current_bucket += 1;
             self.buckets[self.current_bucket as usize] = self.current_entry;
         }
+
+        // Write the lower bits of the hash to the index file.
+        // This is the portion of the hash that remains after removing the bucket bits.
+        // For example, if hash=0x123456 and hash_lower_bits=20, we write 0x56 (lower 20 bits).
+        // The mask (1 << hash_lower_bits) - 1 isolates just the lower bits.
         let _ = self.entry_writer.write(
-            metadata.hash_lower_bits,
-            hash & ((1 << metadata.hash_lower_bits) - 1),
+            global_index.hash_lower_bits,
+            hash & ((1 << global_index.hash_lower_bits) - 1),
         );
+
+        // Write the segment index which identifies which data segment contains this row.
+        // This is encoded using the specified number of bits (seg_id_bits).
         let _ = self
             .entry_writer
-            .write(metadata.seg_id_bits, seg_idx as u32);
+            .write(global_index.seg_id_bits, seg_idx as u32);
+
+        // Write the row index which identifies the specific row within the segment.
+        // This is encoded using the specified number of bits (row_id_bits).
+        // The write() method returns true if the internal buffer is full and needs flushing.
         let to_flush = self
             .entry_writer
-            .write(metadata.row_id_bits, row_idx as u32);
+            .write(global_index.row_id_bits, row_idx as u32);
+
+        // Increment the entry counter to track how many entries we've written.
+        // This counter is used to update bucket offsets and calculate file positions.
         self.current_entry += 1;
 
+        // Return whether the buffer needs to be flushed to disk.
+        // If true, the caller should call flush() to prevent buffer overflow.
         to_flush
     }
 
@@ -1089,13 +1159,13 @@ impl IndexBlockBuilder {
     /// # File Structure After Build
     ///
     /// ```text
-    /// ┌───────────────────────────────┐
-    /// │ Entries Section               │
-    /// │ [hash,seg,row][hash,seg,row]..│ ← Written during write_entry
-    /// ├───────────────────────────────┤
-    /// │ Bucket Array                  │
-    /// │ [offset0][offset1][offset2].. │ ← Written during build
-    /// └───────────────────────────────┘
+    /// ┌───────────────────────────────────┐
+    /// │ Entries Section                   │
+    /// │ [(hash,seg,row), (hash,seg,row)]..│ ← Written during write_entry
+    /// ├───────────────────────────────────┤
+    /// │ Bucket Array                      │
+    /// │ [offset0][offset1][offset2]..     │ ← Written during build
+    /// └───────────────────────────────────┘
     /// ```
     ///
     /// # Arguments
@@ -1637,7 +1707,7 @@ impl<'a> IndexBlockIterator<'a> {
     /// * `file_id_remap` - Mapping from old file IDs to new file IDs
     fn new(
         collection: &'a IndexBlock,
-        metadata: &'a GlobalIndex,
+        global_index: &'a GlobalIndex,
         file_id_remap: &'a Vec<u32>,
     ) -> Self {
         let mut bucket_reader = BitReader::endian(
@@ -1649,14 +1719,14 @@ impl<'a> IndexBlockIterator<'a> {
             .seek_bits(SeekFrom::Start(collection.bucket_start_offset))
             .unwrap();
         let _ = bucket_reader
-            .read_unsigned_var::<u32>(metadata.bucket_bits)
+            .read_unsigned_var::<u32>(global_index.bucket_bits)
             .unwrap();
         let current_bucket_entry_end = bucket_reader
-            .read_unsigned_var::<u32>(metadata.bucket_bits)
+            .read_unsigned_var::<u32>(global_index.bucket_bits)
             .unwrap();
         Self {
             collection,
-            metadata,
+            metadata: global_index,
             bucket_reader,
             entry_reader,
             current_bucket: collection.bucket_start_idx,
