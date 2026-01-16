@@ -19,7 +19,7 @@ use crate::storage::mooncake_table::SnapshotOption;
 use crate::storage::snapshot_options::IcebergSnapshotOption;
 use crate::storage::storage_utils::{FileId, TableId, TableUniqueFileId};
 use crate::storage::storage_utils::{
-    MooncakeDataFileRef, ProcessedDeletionRecord, RawDeletionRecord, RecordLocation,
+    MooncakeDataFileRef, ProcessedDeletionRecord, RawRecord, RecordLocation,
 };
 use crate::table_notify::{
     DataCompactionMaintenanceStatus, IndexMergeMaintenanceStatus, TableEvent,
@@ -810,7 +810,7 @@ impl SnapshotTableState {
 
     async fn match_deletions_with_identical_key_and_lsn(
         &self,
-        deletions: &[RawDeletionRecord],
+        deletions: &[RawRecord],
         index_lookup_result: Vec<RecordLocation>,
         file_id_to_lsn: &HashMap<FileId, u64>,
         batch_id_to_lsn: &HashMap<u64, u64>,
@@ -893,7 +893,7 @@ impl SnapshotTableState {
 
     #[inline]
     fn build_processed_deletion(
-        deletion: &RawDeletionRecord,
+        deletion: &RawRecord,
         pos: RecordLocation,
     ) -> ProcessedDeletionRecord {
         ProcessedDeletionRecord {

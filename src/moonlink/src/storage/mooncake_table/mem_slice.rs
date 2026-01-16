@@ -4,7 +4,7 @@ use crate::row::{IdentityProp, MoonlinkRow};
 use crate::storage::index::MemIndex;
 use crate::storage::mooncake_table::shared_array::SharedRowBufferSnapshot;
 use crate::storage::mooncake_table::BatchIdCounter;
-use crate::storage::storage_utils::{RawDeletionRecord, RecordLocation};
+use crate::storage::storage_utils::{RawRecord, RecordLocation};
 use arrow_array::RecordBatch;
 use arrow_schema::Schema;
 use std::mem::swap;
@@ -48,7 +48,7 @@ impl MemSlice {
     /// Delete the given record from mem slice, and return its location if exists.
     pub(super) async fn delete(
         &mut self,
-        record: &RawDeletionRecord,
+        record: &RawRecord,
         identity: &IdentityProp,
     ) -> Option<(u64 /*batch_id*/, usize /*row_offset*/)> {
         if !self.mem_index.allow_duplicate() {
@@ -76,7 +76,7 @@ impl MemSlice {
     /// Find the first non-deleted position for a given lookup key
     pub async fn find_non_deleted_position(
         &self,
-        record: &RawDeletionRecord,
+        record: &RawRecord,
         identity: &IdentityProp,
     ) -> Option<(u64, usize)> {
         let locations = self.mem_index.find_record(record);
@@ -209,7 +209,7 @@ mod tests {
         assert_eq!(
             mem_table
                 .delete(
-                    &RawDeletionRecord {
+                    &RawRecord {
                         lookup_key: 2,
                         lsn: 0,
                         pos: None,
@@ -224,7 +224,7 @@ mod tests {
         assert_eq!(
             mem_table
                 .delete(
-                    &RawDeletionRecord {
+                    &RawRecord {
                         lookup_key: 3,
                         lsn: 0,
                         pos: None,
@@ -239,7 +239,7 @@ mod tests {
         assert_eq!(
             mem_table
                 .delete(
-                    &RawDeletionRecord {
+                    &RawRecord {
                         lookup_key: 1,
                         lsn: 0,
                         pos: None,

@@ -547,7 +547,8 @@ impl IndexBlock {
         let bucket_entries = self.read_buckets(&bucket_idxs, &mut reader, global_index);
 
         let mut results = Vec::new();
-        let mut lookup_iter = LookupIterator::new(self, global_index, &mut entry_reader, &bucket_entries);
+        let mut lookup_iter =
+            LookupIterator::new(self, global_index, &mut entry_reader, &bucket_entries);
         let mut i = 0;
         let mut lookup_entry = lookup_iter.next();
         while let Some((entry_hash, seg_idx, row_idx)) = lookup_entry {
@@ -892,7 +893,7 @@ impl GlobalIndex {
     /// Unsorted hashes: Need to scan entire index for each hash
     /// Sorted hashes: Scan index once, matching hashes in order
     /// ```
-    pub fn prepare_hashes_for_lookup(values: impl Iterator<Item = u64>) -> Vec<(u64, u64)> {
+    pub fn hash_sort_and_dedup(values: impl Iterator<Item = u64>) -> Vec<(u64, u64)> {
         let mut ret = values
             .map(|value| (value, splitmix64(value)))
             .collect::<Vec<_>>();
@@ -2045,7 +2046,7 @@ impl Debug for GlobalIndex {
 ///
 /// Vector of (key, hash) pairs sorted by hash.
 pub fn test_get_hashes_for_index(values: &[u64]) -> Vec<(u64, u64)> {
-    GlobalIndex::prepare_hashes_for_lookup(values.iter().copied())
+    GlobalIndex::hash_sort_and_dedup(values.iter().copied())
 }
 
 #[cfg(test)]

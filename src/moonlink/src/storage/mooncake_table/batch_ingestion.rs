@@ -340,7 +340,7 @@ mod tests {
         let rows_file2 = MoonlinkRow::from_record_batch(&b2);
         let key1 = IdentityProp::SinglePrimitiveKey(0).get_lookup_key(&rows_file1[0]);
         let key2 = IdentityProp::SinglePrimitiveKey(0).get_lookup_key(&rows_file2[2]);
-        let lookups = crate::storage::index::persisted_bucket_hash_map::GlobalIndex::prepare_hashes_for_lookup(
+        let lookups = crate::storage::index::persisted_bucket_hash_map::GlobalIndex::hash_sort_and_dedup(
             vec![key1, key2].into_iter(),
         );
         let results = index.search_values(&lookups).await;
@@ -396,7 +396,7 @@ mod tests {
         let r2 = MoonlinkRow::from_record_batch(&b2);
         let k1 = IdentityProp::Keys(vec![0]).get_lookup_key(&r1[0]);
         let k2 = IdentityProp::Keys(vec![0]).get_lookup_key(&r2[1]);
-        let lookups = crate::storage::index::persisted_bucket_hash_map::GlobalIndex::prepare_hashes_for_lookup(
+        let lookups = crate::storage::index::persisted_bucket_hash_map::GlobalIndex::hash_sort_and_dedup(
             vec![k1, k2].into_iter(),
         );
         let results = index.search_values(&lookups).await;
@@ -446,7 +446,7 @@ mod tests {
         let index = indices.remove(0);
         let rows = MoonlinkRow::from_record_batch(&b1);
         let k = IdentityProp::FullRow.get_lookup_key(&rows[2]);
-        let lookups = crate::storage::index::persisted_bucket_hash_map::GlobalIndex::prepare_hashes_for_lookup(
+        let lookups = crate::storage::index::persisted_bucket_hash_map::GlobalIndex::hash_sort_and_dedup(
             vec![k].into_iter(),
         );
         let results = index.search_values(&lookups).await;

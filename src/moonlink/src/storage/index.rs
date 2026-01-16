@@ -102,15 +102,17 @@
 //! - [`persisted_bucket_hash_map`]: Persistent file index with bucket hashing
 //! - [`cache_utils`]: Integration with object storage cache
 //! - [`index_merge_config`]: Configuration for index merge operations
+//! - [`index_s3`]: S3-based index for cloud-native storage (no local disk)
 
 pub mod cache_utils;
 pub mod hash_index;
 pub mod index_merge_config;
+pub mod index_s3;
 pub mod mem_index;
 pub mod persisted_bucket_hash_map;
 
 use crate::row::MoonlinkRow;
-use crate::storage::storage_utils::{RawDeletionRecord, RecordLocation};
+use crate::storage::storage_utils::{RawRecord, RecordLocation};
 use multimap::MultiMap;
 use persisted_bucket_hash_map::GlobalIndex;
 use std::collections::HashSet;

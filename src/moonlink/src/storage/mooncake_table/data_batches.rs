@@ -7,7 +7,7 @@ use crate::storage::mooncake_table::batch_id_counter::BatchIdCounter;
 use crate::storage::mooncake_table::delete_vector::BatchDeletionVector;
 use crate::storage::mooncake_table::shared_array::SharedRowBuffer;
 use crate::storage::mooncake_table::shared_array::SharedRowBufferSnapshot;
-use crate::storage::storage_utils::{RawDeletionRecord, RecordLocation};
+use crate::storage::storage_utils::{RawRecord, RecordLocation};
 use arrow::array::{ArrayRef, RecordBatch};
 use arrow_schema::Schema;
 use std::sync::Arc;
@@ -205,7 +205,7 @@ impl ColumnStoreBuffer {
     #[inline]
     pub fn check_identity(
         &self,
-        record: &RawDeletionRecord,
+        record: &RawRecord,
         batch: &InMemoryBatch,
         offset: usize,
         identity: &IdentityProp,
@@ -231,7 +231,7 @@ impl ColumnStoreBuffer {
 
     pub fn find_valid_row_by_record(
         &self,
-        record: &RawDeletionRecord,
+        record: &RawRecord,
         record_location: &RecordLocation,
         identity: &IdentityProp,
     ) -> Option<(u64, usize)> {
@@ -259,7 +259,7 @@ impl ColumnStoreBuffer {
 
     pub fn delete_row_by_record(
         &mut self,
-        record: &RawDeletionRecord,
+        record: &RawRecord,
         record_location: &RecordLocation,
         identity: &IdentityProp,
     ) -> Option<(u64, usize)> {

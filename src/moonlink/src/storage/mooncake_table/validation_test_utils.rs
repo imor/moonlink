@@ -8,7 +8,7 @@ use crate::storage::mooncake_table::DiskFileEntry;
 use crate::storage::mooncake_table::Snapshot;
 use crate::storage::mooncake_table::TableMetadata;
 use crate::storage::storage_utils::FileId;
-use crate::storage::storage_utils::RawDeletionRecord;
+use crate::storage::storage_utils::RawRecord;
 use crate::storage::storage_utils::RecordLocation;
 /// This module contains testing utils for validation.
 use crate::storage::table::iceberg::deletion_vector::DeletionVector;
@@ -144,7 +144,7 @@ pub(crate) async fn check_row_index_nonexistent(snapshot: &Snapshot, row: &Moonl
     let key = snapshot.metadata.config.row_identity.get_lookup_key(row);
     let locs = snapshot
         .indices
-        .find_record(&RawDeletionRecord {
+        .find_record(&RawRecord {
             lookup_key: key,
             row_identity: snapshot
                 .metadata
@@ -171,7 +171,7 @@ pub(crate) async fn check_row_index_on_disk(
     let key = snapshot.metadata.config.row_identity.get_lookup_key(row);
     let locs = snapshot
         .indices
-        .find_record(&RawDeletionRecord {
+        .find_record(&RawRecord {
             lookup_key: key,
             row_identity: snapshot
                 .metadata

@@ -76,7 +76,7 @@
 
 use crate::storage::index::persisted_bucket_hash_map::splitmix64;
 use crate::storage::index::*;
-use crate::storage::storage_utils::{RawDeletionRecord, RecordLocation};
+use crate::storage::storage_utils::{RawRecord, RecordLocation};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -213,9 +213,7 @@ impl MooncakeIndex {
     pub fn insert_file_index(&mut self, file_index: FileIndex) {
         self.file_indices.push(file_index);
     }
-}
 
-impl MooncakeIndex {
     /// Find all locations of a single record.
     ///
     /// Searches both in-memory and file indices for the given key, returning all
@@ -293,7 +291,7 @@ impl MooncakeIndex {
     /// - **Memory lookup**: O(1) hash table lookup per memory index
     /// - **File lookup**: O(1) bucket lookup + O(k) entry scan where k = entries in bucket
     /// - **Overall**: O(m + n*k) where m = memory indices, n = file indices, k = avg bucket size
-    pub async fn find_record(&self, raw_record: &RawDeletionRecord) -> Vec<RecordLocation> {
+    pub async fn find_record(&self, raw_record: &RawRecord) -> Vec<RecordLocation> {
         let mut res: Vec<RecordLocation> = Vec::new();
 
         // Check in-memory indices
@@ -304,8 +302,8 @@ impl MooncakeIndex {
         let value_and_hashes = vec![(raw_record.lookup_key, splitmix64(raw_record.lookup_key))];
 
         // Check file indices
-        for file_index_meta in &self.file_indices {
-            let locations = file_index_meta.search_values(&value_and_hashes).await;
+        for file_index in &self.file_indices {
+            let locations = file_index.search_values(&value_and_hashes).await;
             res.extend(locations.into_iter().map(|(_, location)| location));
         }
         res
@@ -391,10 +389,7 @@ impl MooncakeIndex {
     /// ```
     ///
     /// Speedup: ~3x for file lookups when n file indices exist.
-    pub async fn find_records(
-        &self,
-        raw_records: &[RawDeletionRecord],
-    ) -> Vec<(u64, RecordLocation)> {
+    pub async fn find_records(&self, raw_records: &[RawRecord]) -> Vec<(u64, RecordLocation)> {
         let mut res: Vec<(u64, RecordLocation)> = Vec::new();
         // In memory index may produce duplicate results,
         // since we can't blindly input by key,
@@ -418,9 +413,8 @@ impl MooncakeIndex {
             return res;
         }
         // For file index, we can dedup input by key.
-        let value_and_hashes = GlobalIndex::prepare_hashes_for_lookup(
-            raw_records.iter().map(|record| record.lookup_key),
-        );
+        let value_and_hashes =
+            GlobalIndex::hash_sort_and_dedup(raw_records.iter().map(|record| record.lookup_key));
         // Check file indices
         for file_index_meta in &self.file_indices {
             let locations = file_index_meta.search_values(&value_and_hashes).await;
@@ -446,7 +440,7 @@ mod tests {
         mem_index.insert(3, None, RecordLocation::MemoryBatch(1, 3));
         index.insert_memory_index(Arc::new(mem_index));
 
-        let record = RawDeletionRecord {
+        let record = RawRecord {
             lookup_key: 1,
             row_identity: None,
             pos: None,

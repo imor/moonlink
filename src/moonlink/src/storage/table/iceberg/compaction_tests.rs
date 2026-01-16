@@ -31,7 +31,7 @@ use crate::storage::mooncake_table::table_operation_test_utils::*;
 use crate::storage::mooncake_table::validation_test_utils::*;
 use crate::storage::mooncake_table::Snapshot;
 use crate::storage::storage_utils::{
-    FileId, MooncakeDataFileRef, ProcessedDeletionRecord, RawDeletionRecord, RecordLocation,
+    FileId, MooncakeDataFileRef, ProcessedDeletionRecord, RawRecord, RecordLocation,
 };
 use crate::storage::table::common::table_manager::TableManager;
 use crate::storage::table::iceberg::test_utils::*;
@@ -197,7 +197,7 @@ async fn check_loaded_file_index(file_index: FileIndex, row_indices: Vec<usize>)
     let mut result_row_indices = vec![];
     for cur_row_index in row_indices {
         let cur_row = get_moonlink_row(cur_row_index);
-        let raw_deletion_record = RawDeletionRecord {
+        let raw_deletion_record = RawRecord {
             lookup_key: row_identity.get_lookup_key(&cur_row),
             lsn: 0, // Doesn't affect.
             pos: None,

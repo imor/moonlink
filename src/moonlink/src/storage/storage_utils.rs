@@ -125,7 +125,7 @@ impl Hash for RecordLocation {
 }
 
 #[derive(Debug)]
-pub struct RawDeletionRecord {
+pub struct RawRecord {
     pub(crate) lookup_key: u64,
     pub(crate) row_identity: Option<MoonlinkRow>,
     pub(crate) pos: Option<(u64, usize)>,

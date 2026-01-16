@@ -413,7 +413,7 @@ impl MemIndex {
     /// Panics if called on:
     /// - `MemIndex::FullRow` - use regular delete instead
     /// - `MemIndex::None` - append-only tables don't support deletion
-    pub fn fast_delete(&mut self, raw_record: &RawDeletionRecord) -> Option<RecordLocation> {
+    pub fn fast_delete(&mut self, raw_record: &RawRecord) -> Option<RecordLocation> {
         match self {
             MemIndex::SinglePrimitive(map) => {
                 let entry = map.find_entry(raw_record.lookup_key, |key| {
@@ -512,7 +512,7 @@ impl MemIndex {
     /// # Panics
     ///
     /// Panics if called on `MemIndex::None` (append-only tables).
-    pub fn find_record(&self, raw_record: &RawDeletionRecord) -> Vec<RecordLocation> {
+    pub fn find_record(&self, raw_record: &RawRecord) -> Vec<RecordLocation> {
         match self {
             MemIndex::SinglePrimitive(map) => {
                 if let Some(entry) = map.find(raw_record.lookup_key, |key| {
@@ -694,7 +694,7 @@ mod tests {
         );
 
         // Delete for a non-existent entry.
-        let record_loc = mem_index.fast_delete(&RawDeletionRecord {
+        let record_loc = mem_index.fast_delete(&RawRecord {
             lookup_key: 0,
             row_identity: None,
             pos: None,
@@ -704,7 +704,7 @@ mod tests {
         assert!(record_loc.is_none());
 
         // Delete for an existent entry.
-        let deletion_record = RawDeletionRecord {
+        let deletion_record = RawRecord {
             lookup_key: 10,
             row_identity: None,
             pos: None,
@@ -743,7 +743,7 @@ mod tests {
             RowValue::Float32(3.0),
             RowValue::ByteArray(b"bcd".to_vec()),
         ]);
-        let record_loc = mem_index.fast_delete(&RawDeletionRecord {
+        let record_loc = mem_index.fast_delete(&RawRecord {
             lookup_key: 0,
             row_identity: Some(non_existent_row.clone()),
             pos: None,
@@ -753,7 +753,7 @@ mod tests {
         assert!(record_loc.is_none());
 
         // Delete for a non-existent entry, with the same key, but different row identity.
-        let record_loc = mem_index.fast_delete(&RawDeletionRecord {
+        let record_loc = mem_index.fast_delete(&RawRecord {
             lookup_key: 10,
             row_identity: Some(non_existent_row.clone()),
             pos: None,
@@ -763,7 +763,7 @@ mod tests {
         assert!(record_loc.is_none());
 
         // Delete for an existent entry.
-        let deletion_record = RawDeletionRecord {
+        let deletion_record = RawRecord {
             lookup_key: 10,
             row_identity: Some(existent_row.clone()),
             pos: None,
@@ -791,7 +791,7 @@ mod tests {
         );
 
         // Search for a non-existent entry.
-        let record_locs = mem_index.find_record(&RawDeletionRecord {
+        let record_locs = mem_index.find_record(&RawRecord {
             lookup_key: 0,
             row_identity: None,
             pos: None,
@@ -801,7 +801,7 @@ mod tests {
         assert!(record_locs.is_empty());
 
         // Search for an existent entry.
-        let deletion_record = RawDeletionRecord {
+        let deletion_record = RawRecord {
             lookup_key: 10,
             row_identity: None,
             pos: None,
@@ -834,7 +834,7 @@ mod tests {
             RowValue::Float32(3.0),
             RowValue::ByteArray(b"bcd".to_vec()),
         ]);
-        let record_loc = mem_index.find_record(&RawDeletionRecord {
+        let record_loc = mem_index.find_record(&RawRecord {
             lookup_key: 0,
             row_identity: Some(non_existent_row.clone()),
             pos: None,
@@ -844,7 +844,7 @@ mod tests {
         assert!(record_loc.is_empty());
 
         // Search for a non-existent entry, with the same key, but different row identity.
-        let record_loc = mem_index.find_record(&RawDeletionRecord {
+        let record_loc = mem_index.find_record(&RawRecord {
             lookup_key: 10,
             row_identity: Some(non_existent_row.clone()),
             pos: None,
@@ -854,7 +854,7 @@ mod tests {
         assert!(record_loc.is_empty());
 
         // Search for an existent entry.
-        let deletion_record = RawDeletionRecord {
+        let deletion_record = RawRecord {
             lookup_key: 10,
             row_identity: Some(existent_row.clone()),
             pos: None,
@@ -887,7 +887,7 @@ mod tests {
             RowValue::Float32(3.0),
             RowValue::ByteArray(b"bcd".to_vec()),
         ]);
-        let record_loc = mem_index.find_record(&RawDeletionRecord {
+        let record_loc = mem_index.find_record(&RawRecord {
             lookup_key: 0,
             row_identity: Some(non_existent_row.clone()),
             pos: None,
@@ -897,7 +897,7 @@ mod tests {
         assert!(record_loc.is_empty());
 
         // Search for an existent entry.
-        let deletion_record = RawDeletionRecord {
+        let deletion_record = RawRecord {
             lookup_key: 10,
             row_identity: Some(existent_row.clone()),
             pos: None,

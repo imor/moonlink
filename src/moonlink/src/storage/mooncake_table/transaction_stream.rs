@@ -17,7 +17,7 @@ use more_asserts as ma;
 pub(crate) struct TransactionStreamState {
     mem_slice: MemSlice,
     local_deletions: Vec<ProcessedDeletionRecord>,
-    pending_deletions_in_main_mem_slice: Vec<RawDeletionRecord>,
+    pending_deletions_in_main_mem_slice: Vec<RawRecord>,
     index_bloom_filter: BloomFilter,
     /// Both in memory and on disk indices for this transaction.
     stream_indices: MooncakeIndex,
@@ -61,7 +61,7 @@ pub struct TransactionStreamCommit {
     flushed_file_index: MooncakeIndex,
     flushed_files: hashbrown::HashMap<MooncakeDataFileRef, DiskFileEntry>,
     local_deletions: Vec<ProcessedDeletionRecord>,
-    pending_deletions: Vec<RawDeletionRecord>,
+    pending_deletions: Vec<RawRecord>,
 }
 
 impl TransactionStreamCommit {
@@ -212,7 +212,7 @@ impl MooncakeTable {
         // Perform delete operation.
         let lookup_key = self.metadata.config.row_identity.get_lookup_key(&row);
         let row_identity = self.metadata.config.row_identity.clone();
-        let mut record = RawDeletionRecord {
+        let mut record = RawRecord {
             lookup_key,
             lsn: get_lsn_for_pending_xact(xact_id), // at commit time we will update this with the actual lsn
             pos: None,

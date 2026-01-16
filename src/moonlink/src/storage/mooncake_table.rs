@@ -24,7 +24,7 @@ pub mod table_status_reader;
 mod transaction_stream;
 
 use super::index::{FileIndex, MemIndex, MooncakeIndex};
-use super::storage_utils::{MooncakeDataFileRef, RawDeletionRecord, RecordLocation};
+use super::storage_utils::{MooncakeDataFileRef, RawRecord, RecordLocation};
 use crate::error::Result;
 use crate::observability::latency_exporter::BaseLatencyExporter;
 use crate::observability::snapshot_creation::SnapshotCreationStats;
@@ -238,7 +238,7 @@ pub struct SnapshotTask {
     /// ---- States not recorded by mooncake snapshot ----
     ///
     new_disk_slices: Vec<DiskSliceWriter>,
-    new_deletions: Vec<RawDeletionRecord>,
+    new_deletions: Vec<RawRecord>,
     /// Pair of <batch id, record batch, optional deletion vector for streaming batches>.
     new_record_batches: Vec<RecordBatchWithDeletionVector>,
     new_rows: Option<SharedRowBufferSnapshot>,
@@ -1259,7 +1259,7 @@ impl MooncakeTable {
 
         // Perform delete operation.
         let lookup_key = self.metadata.config.row_identity.get_lookup_key(&row);
-        let mut record = RawDeletionRecord {
+        let mut record = RawRecord {
             lookup_key,
             lsn,
             pos: None,

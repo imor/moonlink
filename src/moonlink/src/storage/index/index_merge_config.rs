@@ -311,22 +311,7 @@ impl FileIndexMergeConfig {
             self.max_file_indices_to_merge
         );
     }
-}
 
-impl Default for FileIndexMergeConfig {
-    /// Create configuration with build-appropriate defaults.
-    ///
-    /// See struct documentation for default values per build type.
-    fn default() -> Self {
-        Self {
-            min_file_indices_to_merge: Self::DEFAULT_MIN_FILE_INDICES_TO_MERGE,
-            max_file_indices_to_merge: Self::DEFAULT_MAX_FILE_INDICES_TO_MERGE,
-            index_block_final_size: Self::DEFAULT_INDEX_BLOCK_FINAL_SIZE,
-        }
-    }
-}
-
-impl FileIndexMergeConfig {
     /// Create a configuration with index merging enabled.
     ///
     /// Uses the default values for the current build type.
@@ -369,6 +354,19 @@ impl FileIndexMergeConfig {
             min_file_indices_to_merge: u32::MAX,
             max_file_indices_to_merge: u32::MAX,
             index_block_final_size: u64::MAX,
+        }
+    }
+}
+
+impl Default for FileIndexMergeConfig {
+    /// Create configuration with build-appropriate defaults.
+    ///
+    /// See struct documentation for default values per build type.
+    fn default() -> Self {
+        Self {
+            min_file_indices_to_merge: Self::DEFAULT_MIN_FILE_INDICES_TO_MERGE,
+            max_file_indices_to_merge: Self::DEFAULT_MAX_FILE_INDICES_TO_MERGE,
+            index_block_final_size: Self::DEFAULT_INDEX_BLOCK_FINAL_SIZE,
         }
     }
 }

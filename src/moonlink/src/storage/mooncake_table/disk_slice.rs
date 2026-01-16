@@ -315,7 +315,7 @@ mod tests {
     use crate::storage::index::persisted_bucket_hash_map::test_get_hashes_for_index;
     use crate::storage::mooncake_table::mem_slice::MemSlice;
     use crate::storage::mooncake_table::BatchIdCounter;
-    use crate::storage::storage_utils::RawDeletionRecord;
+    use crate::storage::storage_utils::RawRecord;
     use arrow::datatypes::{DataType, Field};
     use arrow_array::{Int32Array, StringArray};
     use arrow_schema::Schema;
@@ -461,7 +461,7 @@ mod tests {
         // Delete a couple of rows to test that only active rows are mapped
         mem_slice
             .delete(
-                &RawDeletionRecord {
+                &RawRecord {
                     lookup_key: 2,
                     row_identity: None,
                     pos: Some((0, 1)),
@@ -473,7 +473,7 @@ mod tests {
             .await; // Delete Bob (ID 2)
         mem_slice
             .delete(
-                &RawDeletionRecord {
+                &RawRecord {
                     lookup_key: 4,
                     row_identity: None,
                     pos: Some((0, 3)),
