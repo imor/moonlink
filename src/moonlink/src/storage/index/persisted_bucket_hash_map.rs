@@ -347,19 +347,6 @@ impl Hash for GlobalIndex {
 /// - **Cache efficiency**: Load only needed blocks into memory
 /// - **Incremental updates**: Add new blocks without rewriting all data
 ///
-/// # Structure
-///
-/// ```text
-/// IndexBlock
-/// ├─ bucket_start_idx: 0           # First bucket in this block
-/// ├─ bucket_end_idx: 1000          # Last bucket (exclusive)
-/// ├─ bucket_array_offset: 0        # Bit offset to bucket array
-/// ├─ index_file: "block_0.idx"     # Physical file
-/// ├─ file_size: 5242880            # File size (for merge decisions)
-/// ├─ data: Some(Mmap)              # Memory-mapped file content
-/// └─ cache_handle: Some(Handle)    # Keeps block in cache
-/// ```
-///
 /// # Example
 ///
 /// ```text
@@ -382,20 +369,19 @@ pub(crate) struct IndexBlock {
     /// Index of the last bucket (exclusive) in this block
     pub(crate) bucket_end_idx: u32,
 
-    /// Byte offset where the buckets array starts
+    /// Bit offset where the buckets array starts in the index block file
     pub(crate) bucket_array_offset: u64,
 
-    /// Local index file path.
+    /// Physical index file reference
     pub(crate) index_file: MooncakeDataFileRef,
 
     /// File size for the index block file, used to decide whether to trigger merge index blocks merge.
     pub(crate) file_size: u64,
 
-    /// Mmapped-data.
-    /// Synchronous IO is not needed because here we use mmap.
+    /// Memory-mapped file content for fast random access
     data: Arc<Option<Mmap>>,
 
-    /// Cache handle within object storage cache.
+    /// Cache handle within object storage cache that keeps this block in memory
     pub(crate) cache_handle: Option<NonEvictableHandle>,
 }
 
@@ -503,7 +489,7 @@ impl IndexBlock {
 
     /// Read a single hash entry from the index.
     ///
-    /// Decodes variable-width fields: lower hash bits, segment index, and row index.
+    /// Decodes variable-width fields: lower hash bits, file index, and row index.
     ///
     /// # Arguments
     ///
@@ -584,16 +570,6 @@ impl IndexBlock {
 /// This iterator efficiently walks through hash entries stored in specific
 /// buckets without loading the entire index into memory.
 ///
-/// # Structure
-///
-/// ```text
-/// LookupIterator
-/// ├─ entries: [Bucket623, Bucket892, Bucket1005]  # Buckets to scan
-/// ├─ current_bucket: 0                             # Currently scanning Bucket623
-/// ├─ current_entry: 2                              # On entry 2 of current bucket
-/// └─ entry_reader: BitReader                       # Reads hash entries from mmap
-/// ```
-///
 /// # Usage Pattern
 ///
 /// ```text
@@ -622,11 +598,17 @@ impl IndexBlock {
 /// // Then automatically scans bucket 205 (entries 892, 893, 894)
 /// ```
 pub struct LookupIterator<'a> {
+    /// Index block containing the entries to scan
     index: &'a IndexBlock,
+    /// Global index metadata for bit widths
     metadata: &'a GlobalIndex,
+    /// Bit reader that reads hash entries from the memory-mapped file
     entry_reader: &'a mut BitReader<Cursor<&'a [u8]>, BigEndian>,
+    /// Buckets to scan (contains entry ranges)
     entries: &'a Vec<BucketEntry>,
+    /// Currently scanning this bucket index in the entries array
     current_bucket: usize,
+    /// Current entry position within the bucket
     current_entry: u32,
 }
 
@@ -924,18 +906,6 @@ impl GlobalIndex {
 /// 1. **Entry writing**: Append hash entries as they arrive
 /// 2. **Bucket writing**: Write bucket array pointing to entries
 ///
-/// # Structure
-///
-/// ```text
-/// IndexBlockBuilder
-/// ├─ bucket_start_idx: 0           # First bucket this block covers
-/// ├─ bucket_end_idx: 1000          # Last bucket (exclusive)
-/// ├─ buckets: [0, 0, 3, 3, 7, ...] # Entry counts per bucket
-/// ├─ current_bucket: 5             # Currently filling bucket 5
-/// ├─ current_entry: 7              # 7 entries written so far
-/// └─ entry_writer: BitWriter       # Writes to index_block_X.bin
-/// ```
-///
 /// # Write Process
 ///
 /// ```text
@@ -985,7 +955,7 @@ struct IndexBlockBuilder {
     /// Last bucket index covered by this index block (exclusive)
     bucket_end_idx: u32,
 
-    /// Offset to the first entry for each bucket in this block.
+    /// Entry counts per bucket. Contains offsets to the first entry for each bucket in this block.
     /// Length = (bucket_end_idx - bucket_start_idx).
     /// Each value points to the entry position where that bucket's entries start.
     /// Example: [0, 0, 3, 3, 7] means buckets 0-1 are empty, bucket 2 has entries [0,3), etc.
@@ -997,12 +967,10 @@ struct IndexBlockBuilder {
     /// Bit-level writer for variable-bit encoding of entries to disk
     entry_writer: AsyncBitWriter<AsyncFile, AsyncBigEndian>,
 
-    /// The bucket currently being populated with entries.
-    /// Increments when entries move to a new bucket.
+    /// Currently filling this bucket. Increments when entries move to a new bucket.
     current_bucket: u32,
 
-    /// Total number of entries written so far.
-    /// Used to populate bucket offsets and track progress.
+    /// Total number of entries written so far. Used to populate bucket offsets and track progress.
     current_entry: u32,
 }
 
@@ -1688,7 +1656,7 @@ struct IndexBlockIterator<'a> {
     collection: &'a IndexBlock,
 
     /// Global index metadata containing bit width information for decoding entries
-    metadata: &'a GlobalIndex,
+    global_index: &'a GlobalIndex,
 
     /// Index of the bucket currently being read
     current_bucket: u32,
@@ -1743,7 +1711,7 @@ impl<'a> IndexBlockIterator<'a> {
             .unwrap();
         Self {
             collection,
-            metadata: global_index,
+            global_index,
             bucket_reader,
             entry_reader,
             current_bucket: collection.bucket_start_idx,
@@ -1780,13 +1748,13 @@ impl<'a> IndexBlockIterator<'a> {
             }
             self.current_bucket_entry_end = self
                 .bucket_reader
-                .read_unsigned_var::<u32>(self.metadata.bucket_bits)
+                .read_unsigned_var::<u32>(self.global_index.bucket_bits)
                 .unwrap();
-            self.current_upper_hash += 1 << self.metadata.hash_lower_bits;
+            self.current_upper_hash += 1 << self.global_index.hash_lower_bits;
         }
         let (lower_hash, file_idx, row_idx) = self
             .collection
-            .read_entry(&mut self.entry_reader, self.metadata);
+            .read_entry(&mut self.entry_reader, self.global_index);
         self.current_entry += 1;
         let file_idx = self.file_id_remap.get(file_idx).unwrap();
         assert_ne!(*file_idx, INVALID_FILE_ID);
