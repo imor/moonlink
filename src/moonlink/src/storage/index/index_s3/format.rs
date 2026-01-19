@@ -69,7 +69,7 @@ pub struct S3IndexHeader {
     pub hash_lower_bits: u32,
 
     /// Bits for segment (file) index.
-    pub seg_id_bits: u32,
+    pub file_id_bits: u32,
 
     /// Bits for row index within file.
     pub row_id_bits: u32,
@@ -116,7 +116,7 @@ impl S3IndexHeader {
         // Bit widths
         buf.put_u32(self.hash_upper_bits);
         buf.put_u32(self.hash_lower_bits);
-        buf.put_u32(self.seg_id_bits);
+        buf.put_u32(self.file_id_bits);
         buf.put_u32(self.row_id_bits);
         buf.put_u32(self.entry_size);
 
@@ -178,7 +178,7 @@ impl S3IndexHeader {
         // Bit widths
         let hash_upper_bits = buf.get_u32();
         let hash_lower_bits = buf.get_u32();
-        let seg_id_bits = buf.get_u32();
+        let file_id_bits = buf.get_u32();
         let row_id_bits = buf.get_u32();
         let entry_size = buf.get_u32();
 
@@ -207,7 +207,7 @@ impl S3IndexHeader {
             num_files,
             hash_upper_bits,
             hash_lower_bits,
-            seg_id_bits,
+            file_id_bits,
             row_id_bits,
             entry_size,
             bucket_dir_offset,
@@ -222,10 +222,10 @@ impl S3IndexHeader {
 
     /// Calculate entry size from bit widths.
     ///
-    /// Each entry contains: lower_hash + seg_id + row_id
+    /// Each entry contains: lower_hash + file_id + row_id
     /// Size is rounded up to the nearest byte.
-    pub fn calculate_entry_size(hash_lower_bits: u32, seg_id_bits: u32, row_id_bits: u32) -> u32 {
-        let total_bits = hash_lower_bits + seg_id_bits + row_id_bits;
+    pub fn calculate_entry_size(hash_lower_bits: u32, file_id_bits: u32, row_id_bits: u32) -> u32 {
+        let total_bits = hash_lower_bits + file_id_bits + row_id_bits;
         (total_bits + 7) / 8 // Round up to bytes
     }
 }
@@ -314,7 +314,7 @@ mod tests {
             num_files: 10,
             hash_upper_bits: 32,
             hash_lower_bits: 32,
-            seg_id_bits: 4,
+            file_id_bits: 4,
             row_id_bits: 24,
             entry_size: 8,
             bucket_dir_offset: 256,
@@ -337,7 +337,7 @@ mod tests {
         assert_eq!(decoded.num_files, header.num_files);
         assert_eq!(decoded.hash_upper_bits, header.hash_upper_bits);
         assert_eq!(decoded.hash_lower_bits, header.hash_lower_bits);
-        assert_eq!(decoded.seg_id_bits, header.seg_id_bits);
+        assert_eq!(decoded.file_id_bits, header.file_id_bits);
         assert_eq!(decoded.row_id_bits, header.row_id_bits);
         assert_eq!(decoded.entry_size, header.entry_size);
     }

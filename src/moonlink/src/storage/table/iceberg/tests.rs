@@ -123,7 +123,7 @@ fn create_file_index(data_files: Vec<MooncakeDataFileRef>) -> GlobalIndex {
         hash_bits: 0,
         hash_upper_bits: 0,
         hash_lower_bits: 0,
-        seg_id_bits: 0,
+        file_id_bits: 0,
         row_id_bits: 0,
         bucket_bits: 0,
         index_blocks: vec![],

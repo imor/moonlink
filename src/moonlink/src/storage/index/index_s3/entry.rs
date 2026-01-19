@@ -58,7 +58,7 @@ impl S3IndexEntry {
         let mut buf = BytesMut::with_capacity(header.entry_size as usize);
 
         // Pack bits: lower_hash | file_idx | row_idx
-        let total_bits = header.hash_lower_bits + header.seg_id_bits + header.row_id_bits;
+        let total_bits = header.hash_lower_bits + header.file_id_bits + header.row_id_bits;
         let total_bytes = (total_bits + 7) / 8;
 
         // Create a u128 to hold all bits, then extract bytes
@@ -70,8 +70,8 @@ impl S3IndexEntry {
         bit_pos += header.row_id_bits;
 
         // Add file_idx
-        packed |= ((self.file_idx as u128) & ((1u128 << header.seg_id_bits) - 1)) << bit_pos;
-        bit_pos += header.seg_id_bits;
+        packed |= ((self.file_idx as u128) & ((1u128 << header.file_id_bits) - 1)) << bit_pos;
+        bit_pos += header.file_id_bits;
 
         // Add lower_hash (most significant of the packed data)
         packed |= ((self.lower_hash as u128) & ((1u128 << header.hash_lower_bits) - 1)) << bit_pos;
@@ -108,9 +108,9 @@ impl S3IndexEntry {
         let row_idx = (packed & row_mask) as u64;
         packed >>= header.row_id_bits;
 
-        let seg_mask = (1u128 << header.seg_id_bits) - 1;
+        let seg_mask = (1u128 << header.file_id_bits) - 1;
         let file_idx = (packed & seg_mask) as u32;
-        packed >>= header.seg_id_bits;
+        packed >>= header.file_id_bits;
 
         let hash_mask = (1u128 << header.hash_lower_bits) - 1;
         let lower_hash = (packed & hash_mask) as u64;
@@ -199,7 +199,7 @@ mod tests {
             num_files: 10,
             hash_upper_bits: 32,
             hash_lower_bits: 32,
-            seg_id_bits: 4,
+            file_id_bits: 4,
             row_id_bits: 24,
             entry_size: 8, // (32 + 4 + 24) / 8 = 7.5 → 8
             bucket_dir_offset: 0,
@@ -292,7 +292,7 @@ mod tests {
             num_files: 4,
             hash_upper_bits: 48,
             hash_lower_bits: 16, // Only 16 bits of hash
-            seg_id_bits: 2,      // 4 files max
+            file_id_bits: 2,      // 4 files max
             row_id_bits: 14,     // 16K rows max
             entry_size: 4,       // (16 + 2 + 14) / 8 = 4 bytes
             bucket_dir_offset: 0,

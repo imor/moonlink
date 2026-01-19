@@ -100,17 +100,17 @@ pub(crate) async fn create_file_index_1(
     let entries = vec![
         (
             get_hash_for_row(ID_VALUES[0], NAME_VALUES[0], AGE_VALUES[0]),
-            /*seg_idx=*/ 0,
+            /*file_idx=*/ 0,
             /*row_idx=*/ 0,
         ),
         (
             get_hash_for_row(ID_VALUES[1], NAME_VALUES[1], AGE_VALUES[1]),
-            /*seg_idx=*/ 0,
+            /*file_idx=*/ 0,
             /*row_idx=*/ 1,
         ),
         (
             get_hash_for_row(ID_VALUES[2], NAME_VALUES[2], AGE_VALUES[2]),
-            /*seg_idx=*/ 0,
+            /*file_idx=*/ 0,
             /*row_idx=*/ 2,
         ),
     ];
@@ -128,17 +128,17 @@ pub(crate) async fn create_file_index_2(
     let entries = vec![
         (
             get_hash_for_row(ID_VALUES[3], NAME_VALUES[3], AGE_VALUES[3]),
-            /*seg_idx=*/ 0,
+            /*file_idx=*/ 0,
             /*row_idx=*/ 0,
         ),
         (
             get_hash_for_row(ID_VALUES[4], NAME_VALUES[4], AGE_VALUES[4]),
-            /*seg_idx=*/ 0,
+            /*file_idx=*/ 0,
             /*row_idx=*/ 1,
         ),
         (
             get_hash_for_row(ID_VALUES[5], NAME_VALUES[5], AGE_VALUES[5]),
-            /*seg_idx=*/ 0,
+            /*file_idx=*/ 0,
             /*row_idx=*/ 2,
         ),
     ];
@@ -157,7 +157,7 @@ pub(crate) async fn create_file_index_for_both_batches(
     for idx in 0..NUM_ROWS {
         entries.push((
             get_hash_for_row(ID_VALUES[idx], NAME_VALUES[idx], AGE_VALUES[idx]),
-            /*seg_idx=*/ 0,
+            /*file_idx=*/ 0,
             /*row_idx=*/ idx,
         ));
     }

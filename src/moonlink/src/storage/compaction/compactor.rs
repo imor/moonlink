@@ -358,7 +358,7 @@ impl CompactionBuilder {
             };
 
         let start_table_auto_incr_id = self.file_params.table_auto_incr_ids.start as u64;
-        let get_seg_idx = |new_record_location: RecordLocation| -> usize /*seg_idx*/ {
+        let get_file_idx = |new_record_location: RecordLocation| -> usize /*file_idx*/ {
             let file_id = new_record_location.get_file_id().unwrap();
             Self::get_file_index_after_compaction(start_table_auto_incr_id, file_id)
         };
@@ -375,7 +375,7 @@ impl CompactionBuilder {
                 old_file_indices,
                 /*new_data_files=*/ self.get_new_compacted_data_files(),
                 get_remapped_record_location,
-                get_seg_idx,
+                get_file_idx,
             )
             .await
     }

@@ -108,14 +108,14 @@ impl S3GlobalIndexBuilder {
             .max(self.files.len().saturating_sub(1) as u32);
         let max_row_idx = hash_entries.iter().map(|e| e.2).max().unwrap_or(0);
 
-        let seg_id_bits = bits_needed(max_file_idx as u64).max(1);
+        let file_id_bits = bits_needed(max_file_idx as u64).max(1);
         let row_id_bits = bits_needed(max_row_idx).max(1);
 
         // Use 32 bits for bucket selection, 32 for storage
         let hash_upper_bits = 32;
         let hash_lower_bits = 32;
 
-        let entry_size = S3IndexHeader::calculate_entry_size(hash_lower_bits, seg_id_bits, row_id_bits);
+        let entry_size = S3IndexHeader::calculate_entry_size(hash_lower_bits, file_id_bits, row_id_bits);
 
         // Distribute entries into buckets
         let num_buckets = self.config.num_buckets;
@@ -143,7 +143,7 @@ impl S3GlobalIndexBuilder {
             &buckets,
             hash_upper_bits,
             hash_lower_bits,
-            seg_id_bits,
+            file_id_bits,
             row_id_bits,
             entry_size,
         )?;
@@ -278,7 +278,7 @@ impl S3GlobalIndexBuilder {
         buckets: &[Vec<S3IndexEntry>],
         hash_upper_bits: u32,
         hash_lower_bits: u32,
-        seg_id_bits: u32,
+        file_id_bits: u32,
         row_id_bits: u32,
         entry_size: u32,
     ) -> S3IndexResult<Bytes> {
@@ -309,7 +309,7 @@ impl S3GlobalIndexBuilder {
             num_files: self.files.len() as u32,
             hash_upper_bits,
             hash_lower_bits,
-            seg_id_bits,
+            file_id_bits,
             row_id_bits,
             entry_size,
             bucket_dir_offset,

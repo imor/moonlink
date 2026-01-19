@@ -105,12 +105,12 @@ impl MemSlice {
         row: MoonlinkRow,
         identity_for_key: Option<MoonlinkRow>,
     ) -> Result<Option<(u64, Arc<RecordBatch>)>> {
-        let (seg_idx, row_idx, new_batch) = self.column_store.append_row(row)?;
+        let (file_idx, row_idx, new_batch) = self.column_store.append_row(row)?;
 
         // Skip index insertion for append-only tables (MemIndex::None)
         if !matches!(self.mem_index, MemIndex::None) {
             self.mem_index
-                .insert(lookup_key, identity_for_key, (seg_idx, row_idx).into());
+                .insert(lookup_key, identity_for_key, (file_idx, row_idx).into());
         }
 
         Ok(new_batch)

@@ -52,8 +52,8 @@ pub(crate) struct FileIndex {
     hash_upper_bits: u32,
     #[serde(rename = "hash_lower_bits")]
     hash_lower_bits: u32,
-    #[serde(rename = "seg_id_bits")]
-    seg_id_bits: u32,
+    #[serde(rename = "file_id_bits")]
+    file_id_bits: u32,
     #[serde(rename = "row_id_bits")]
     row_id_bits: u32,
     #[serde(rename = "bucket_bits")]
@@ -105,7 +105,7 @@ impl FileIndex {
             hash_bits: mooncake_index.hash_bits,
             hash_upper_bits: mooncake_index.hash_upper_bits,
             hash_lower_bits: mooncake_index.hash_lower_bits,
-            seg_id_bits: mooncake_index.seg_id_bits,
+            file_id_bits: mooncake_index.file_id_bits,
             row_id_bits: mooncake_index.row_id_bits,
             bucket_bits: mooncake_index.bucket_bits,
         }
@@ -176,7 +176,7 @@ impl FileIndex {
             hash_bits: self.hash_bits,
             hash_upper_bits: self.hash_upper_bits,
             hash_lower_bits: self.hash_lower_bits,
-            seg_id_bits: self.seg_id_bits,
+            file_id_bits: self.file_id_bits,
             row_id_bits: self.row_id_bits,
             bucket_bits: self.bucket_bits,
             index_blocks: mooncake_index_blocks,
@@ -323,7 +323,7 @@ mod tests {
             hash_bits: 10,
             hash_upper_bits: 4,
             hash_lower_bits: 6,
-            seg_id_bits: 6,
+            file_id_bits: 6,
             row_id_bits: 3,
             bucket_bits: 5,
             files: vec![local_data_file.clone()],
@@ -395,8 +395,8 @@ mod tests {
             original_mooncake_file_index.hash_lower_bits
         );
         assert_eq!(
-            mooncake_file_index.seg_id_bits,
-            original_mooncake_file_index.seg_id_bits
+            mooncake_file_index.file_id_bits,
+            original_mooncake_file_index.file_id_bits
         );
         assert_eq!(
             mooncake_file_index.row_id_bits,

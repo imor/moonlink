@@ -169,10 +169,10 @@ impl MooncakeTable {
         table_dir: PathBuf,
         index_file_id: u64,
     ) -> Result<FileIndex> {
-        // Accumulate (hash, seg_idx, row_idx)
+        // Accumulate (hash, file_idx, row_idx)
         let mut entries: Vec<(u64, usize, usize)> = Vec::new();
 
-        for (seg_idx, data_file) in files.iter().enumerate() {
+        for (file_idx, data_file) in files.iter().enumerate() {
             let file = tokio::fs::File::open(data_file.file_path()).await?;
             let mut stream_builder = ParquetRecordBatchStreamBuilder::new(file).await?;
             let schema_descr = stream_builder.metadata().file_metadata().schema_descr();
@@ -188,7 +188,7 @@ impl MooncakeTable {
                     let rows = MoonlinkRow::from_record_batch(&batch);
                     for row in rows {
                         let hash = identity.get_lookup_key_from_identity_row(&row);
-                        entries.push((hash, seg_idx, row_idx_within_file));
+                        entries.push((hash, file_idx, row_idx_within_file));
                         row_idx_within_file += 1;
                     }
                 }
@@ -400,7 +400,7 @@ mod tests {
             vec![k1, k2].into_iter(),
         );
         let results = index.search_values(&lookups).await;
-        // Ensure deterministic order for seg_idx mapping in assertions
+        // Ensure deterministic order for file_idx mapping in assertions
         files.sort_by_key(|f| f.file_path().clone());
         let file_ids: Vec<_> = files.iter().map(|f| f.file_id()).collect();
         assert!(results.contains(&(k1, RecordLocation::DiskFile(file_ids[0], 0))));

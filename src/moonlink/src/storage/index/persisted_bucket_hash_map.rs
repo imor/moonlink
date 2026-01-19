@@ -10,8 +10,8 @@
 //!
 //! A key value pair stored in the index. Also called an entry in short.
 //! The key stored in the entry is the lower bits of the hash of the
-//! original key (primary key). The value is the file id and row id in
-//! the file.
+//! original key (primary key). The value is the parquet file id and row id in
+//! the that file.
 //!
 //! ### Hash Bucket
 //!
@@ -47,6 +47,8 @@
 //!     v       v       v            v
 //!   Points to entries in the entries section
 //! ```
+//!
+//! Each offset points to all entries from one bucket.
 //!
 //! ### 2. Entries Section
 //!
@@ -128,7 +130,7 @@
 //!
 //! ```rust,ignore
 //! // Example: If we have 4 files and 1 million rows per file
-//! seg_id_bits = ceil(log2(4)) = 2 bits
+//! file_id_bits = ceil(log2(4)) = 2 bits
 //! row_id_bits = ceil(log2(1_000_000)) = 20 bits
 //! hash_lower_bits = 64 - hash_upper_bits
 //!
@@ -242,7 +244,7 @@ pub(super) fn splitmix64(mut x: u64) -> u64 {
 /// ├─ hash_bits: u32                 # Total hash bits (always 64)
 /// ├─ hash_upper_bits: u32           # Bits for bucket index
 /// ├─ hash_lower_bits: u32           # Bits stored in entries
-/// ├─ seg_id_bits: u32               # Bits for file index
+/// ├─ file_id_bits: u32               # Bits for file index
 /// ├─ row_id_bits: u32               # Bits for row index
 /// ├─ bucket_bits: u32               # Bits for bucket offsets
 /// └─ index_blocks: Vec<IndexBlock>  # Physical index files
@@ -260,7 +262,7 @@ pub(super) fn splitmix64(mut x: u64) -> u64 {
 ///     hash_bits: 64,
 ///     hash_upper_bits: 32,  // 4 billion buckets possible
 ///     hash_lower_bits: 32,  // Verify with lower 32 bits
-///     seg_id_bits: 1,       // 2 files → 1 bit
+///     file_id_bits: 1,       // 2 files → 1 bit
 ///     row_id_bits: 10,      // 1024 rows max → 10 bits
 ///     bucket_bits: 11,      // Entry counts up to 2048 → 11 bits
 ///     
@@ -274,10 +276,10 @@ pub(super) fn splitmix64(mut x: u64) -> u64 {
 ///
 /// ```rust,ignore
 /// // For 16 files with up to 10 million rows each
-/// seg_id_bits = ceil(log2(16)) = 4 bits
+/// file_id_bits = ceil(log2(16)) = 4 bits
 /// row_id_bits = ceil(log2(10_000_000)) = 24 bits
 ///
-/// // Each entry: hash_lower + seg_id + row_id
+/// // Each entry: hash_lower + file_id + row_id
 /// //           = 32 + 4 + 24 = 60 bits (vs 128 bits naive encoding)
 /// ```
 ///
@@ -304,7 +306,7 @@ pub struct GlobalIndex {
     pub(crate) hash_bits: u32,
     pub(crate) hash_upper_bits: u32,
     pub(crate) hash_lower_bits: u32,
-    pub(crate) seg_id_bits: u32,
+    pub(crate) file_id_bits: u32,
     pub(crate) row_id_bits: u32,
     pub(crate) bucket_bits: u32,
 
@@ -501,7 +503,7 @@ impl IndexBlock {
     ///
     /// # Returns
     ///
-    /// Tuple of (lower_hash, seg_idx, row_idx)
+    /// Tuple of (lower_hash, file_idx, row_idx)
     #[inline]
     fn read_entry(
         &self,
@@ -511,13 +513,13 @@ impl IndexBlock {
         let hash = reader
             .read_unsigned_var::<u64>(global_index.hash_lower_bits)
             .unwrap();
-        let seg_idx = reader
-            .read_unsigned_var::<u32>(global_index.seg_id_bits)
+        let file_idx = reader
+            .read_unsigned_var::<u32>(global_index.file_id_bits)
             .unwrap();
         let row_idx = reader
             .read_unsigned_var::<u32>(global_index.row_id_bits)
             .unwrap();
-        (hash, seg_idx as usize, row_idx as usize)
+        (hash, file_idx as usize, row_idx as usize)
     }
 
     /// Search for multiple values in this index block.
@@ -551,7 +553,7 @@ impl IndexBlock {
             LookupIterator::new(self, global_index, &mut entry_reader, &bucket_entries);
         let mut i = 0;
         let mut lookup_entry = lookup_iter.next();
-        while let Some((entry_hash, seg_idx, row_idx)) = lookup_entry {
+        while let Some((entry_hash, file_idx, row_idx)) = lookup_entry {
             while i < value_and_hashes.len() && value_and_hashes[i].1 < entry_hash {
                 i += 1;
             }
@@ -559,7 +561,7 @@ impl IndexBlock {
                 let value = value_and_hashes[i].0;
                 results.push((
                     value,
-                    RecordLocation::DiskFile(global_index.files[seg_idx].file_id(), row_idx),
+                    RecordLocation::DiskFile(global_index.files[file_idx].file_id(), row_idx),
                 ));
             }
             lookup_entry = lookup_iter.next();
@@ -588,7 +590,7 @@ impl IndexBlock {
 /// ```text
 /// Step 1: Create iterator with specific buckets to scan
 /// Step 2: Iterator seeks to first entry of first bucket
-/// Step 3: next() returns (full_hash, seg_idx, row_idx)
+/// Step 3: next() returns (full_hash, file_idx, row_idx)
 /// Step 4: When bucket exhausted, moves to next bucket
 /// Step 5: Continues until all specified buckets scanned
 /// ```
@@ -656,7 +658,7 @@ impl<'a> LookupIterator<'a> {
     /// # Calculation
     ///
     /// ```text
-    /// entry_size = hash_lower_bits + seg_id_bits + row_id_bits
+    /// entry_size = hash_lower_bits + file_id_bits + row_id_bits
     /// bit_offset = current_entry * entry_size
     /// ```
     fn seek_to_bucket_entry_start(&mut self) {
@@ -666,7 +668,7 @@ impl<'a> LookupIterator<'a> {
                 .seek_bits(SeekFrom::Start(
                     self.current_entry as u64
                         * (self.metadata.hash_lower_bits
-                            + self.metadata.seg_id_bits
+                            + self.metadata.file_id_bits
                             + self.metadata.row_id_bits) as u64,
                 ))
                 .unwrap();
@@ -680,7 +682,7 @@ impl<'a> LookupIterator<'a> {
     ///
     /// # Returns
     ///
-    /// * `Some((full_hash, seg_idx, row_idx))` - Next entry
+    /// * `Some((full_hash, file_idx, row_idx))` - Next entry
     /// * `None` - All buckets exhausted
     ///
     /// # Hash Reconstruction
@@ -696,12 +698,12 @@ impl<'a> LookupIterator<'a> {
                 return None;
             }
             if self.current_entry < self.entries[self.current_bucket].entry_end {
-                let (lower_hash, seg_idx, row_idx) =
+                let (lower_hash, file_idx, row_idx) =
                     self.index.read_entry(self.entry_reader, self.metadata);
                 self.current_entry += 1;
                 return Some((
                     lower_hash | self.entries[self.current_bucket].upper_hash,
-                    seg_idx,
+                    file_idx,
                     row_idx,
                 ));
             }
@@ -838,7 +840,7 @@ impl GlobalIndex {
     ///
     /// # Returns
     ///
-    /// Iterator that yields (hash, seg_idx, row_idx) tuples in hash order.
+    /// Iterator that yields (hash, file_idx, row_idx) tuples in hash order.
     ///
     /// # Example
     ///
@@ -847,8 +849,8 @@ impl GlobalIndex {
     /// let identity_remap = (0..index.files.len() as u32).collect();
     /// let mut iter = index.create_iterator(&identity_remap);
     ///
-    /// while let Some((hash, seg_idx, row_idx)) = iter.next() {
-    ///     println!("Entry: hash={}, file={}, row={}", hash, seg_idx, row_idx);
+    /// while let Some((hash, file_idx, row_idx)) = iter.next() {
+    ///     println!("Entry: hash={}, file={}, row={}", hash, file_idx, row_idx);
     /// }
     /// ```
     pub fn create_iterator<'a>(&'a self, file_id_remap: &'a Vec<u32>) -> GlobalIndexIterator<'a> {
@@ -1043,7 +1045,7 @@ impl IndexBlockBuilder {
     /// # Arguments
     ///
     /// * `hash` - Full 64-bit hash value
-    /// * `seg_idx` - File index (which Parquet file)
+    /// * `file_idx` - File index (which Parquet file)
     /// * `row_idx` - Row index within the file
     /// * `metadata` - Global index metadata for bit widths
     ///
@@ -1077,13 +1079,13 @@ impl IndexBlockBuilder {
     /// ```text
     /// 1. Extract bucket index from upper hash bits
     /// 2. Update bucket offsets for any skipped buckets
-    /// 3. Write entry: (lower_hash, seg_idx, row_idx)
+    /// 3. Write entry: (lower_hash, file_idx, row_idx)
     /// 4. Return true if buffer needs flushing
     /// ```
     pub fn write_entry(
         &mut self,
         hash: u64,
-        seg_idx: usize,
+        file_idx: usize,
         row_idx: usize,
         global_index: &GlobalIndex,
     ) -> bool {
@@ -1109,10 +1111,10 @@ impl IndexBlockBuilder {
         );
 
         // Write the segment index which identifies which data segment contains this row.
-        // This is encoded using the specified number of bits (seg_id_bits).
+        // This is encoded using the specified number of bits (file_id_bits).
         let _ = self
             .entry_writer
-            .write(global_index.seg_id_bits, seg_idx as u32);
+            .write(global_index.file_id_bits, file_idx as u32);
 
         // Write the row index which identifies the specific row within the segment.
         // This is encoded using the specified number of bits (row_id_bits).
@@ -1181,7 +1183,7 @@ impl IndexBlockBuilder {
             self.buckets[i as usize] = self.current_entry;
         }
         let bucket_start_offset = (self.current_entry as u64)
-            * (metadata.hash_lower_bits + metadata.seg_id_bits + metadata.row_id_bits) as u64;
+            * (metadata.hash_lower_bits + metadata.file_id_bits + metadata.row_id_bits) as u64;
         let buckets = std::mem::take(&mut self.buckets);
         for cur_bucket in buckets {
             let to_flush = self.entry_writer.write(metadata.bucket_bits, cur_bucket);
@@ -1279,7 +1281,7 @@ impl GlobalIndexBuilder {
     ///
     /// Calculates optimal bit widths based on data size:
     /// - `bucket_bits`: Based on total rows
-    /// - `seg_id_bits`: Based on number of files
+    /// - `file_id_bits`: Based on number of files
     /// - `hash_upper_bits`: For bucket indexing
     /// - `hash_lower_bits`: For hash verification
     ///
@@ -1292,14 +1294,14 @@ impl GlobalIndexBuilder {
         let num_buckets = (num_rows / 4 + 2).next_power_of_two();
         let upper_bits = num_buckets.trailing_zeros();
         let lower_bits = 64 - upper_bits;
-        let seg_id_bits = 32 - (self.files.len() as u32).trailing_zeros();
+        let file_id_bits = 32 - (self.files.len() as u32).trailing_zeros();
         let global_index = GlobalIndex {
             files: std::mem::take(&mut self.files),
             num_rows,
             hash_bits: HASH_BITS,
             hash_upper_bits: upper_bits,
             hash_lower_bits: lower_bits,
-            seg_id_bits,
+            file_id_bits,
             row_id_bits: 32,
             bucket_bits,
             index_blocks: vec![],
@@ -1410,7 +1412,7 @@ impl GlobalIndexBuilder {
     ///
     /// # Arguments
     ///
-    /// * `iter` - Iterator yielding (hash, seg_idx, row_idx) tuples (must be sorted by hash)
+    /// * `iter` - Iterator yielding (hash, file_idx, row_idx) tuples (must be sorted by hash)
     /// * `file_id` - File ID for the index block file
     ///
     /// # Returns
@@ -1544,7 +1546,7 @@ impl GlobalIndexBuilder {
     /// * `indices` - Indices to merge from pre-compaction files
     /// * `new_data_files` - Post-compaction data files
     /// * `get_remapped_record_location` - Maps old locations to new locations (or None if deleted)
-    /// * `get_seg_idx` - Extracts segment index from a record location
+    /// * `get_file_idx` - Extracts segment index from a record location
     ///
     /// # Returns
     ///
@@ -1578,11 +1580,11 @@ impl GlobalIndexBuilder {
         indices: Vec<GlobalIndex>,
         new_data_files: Vec<MooncakeDataFileRef>,
         get_remapped_record_location: GetRemappedRecLoc,
-        get_seg_idx: GetSegIdx,
+        get_file_idx: GetSegIdx,
     ) -> Result<GlobalIndex>
     where
         GetRemappedRecLoc: FnMut(RecordLocation) -> Option<RecordLocation>,
-        GetSegIdx: FnMut(RecordLocation) -> usize, /*seg_idx*/
+        GetSegIdx: FnMut(RecordLocation) -> usize, /*file_idx*/
     {
         // Assign data files before compaction, used to compose old record location and look it up with [`get_remapped_record_location`] and new record location after compaction.
         self.files = indices
@@ -1602,7 +1604,7 @@ impl GlobalIndexBuilder {
             merge_iter,
             new_data_files,
             get_remapped_record_location,
-            get_seg_idx,
+            get_file_idx,
         )
         .await
     }
@@ -1618,34 +1620,34 @@ impl GlobalIndexBuilder {
     /// * `iter` - Merging iterator over old entries
     /// * `new_data_files` - Post-compaction data files
     /// * `get_remapped_record_location` - Maps old → new locations (None = deleted)
-    /// * `get_seg_idx` - Extracts file index from location
+    /// * `get_file_idx` - Extracts file index from location
     async fn build_from_merging_iterator_with_predicate<GetRemappedRecLoc, GetSegIdx>(
         mut self,
         file_id: u64,
         mut iter: GlobalIndexMergingIterator<'_>,
         new_data_files: Vec<MooncakeDataFileRef>,
         mut get_remapped_record_location: GetRemappedRecLoc,
-        mut get_seg_idx: GetSegIdx,
+        mut get_file_idx: GetSegIdx,
     ) -> Result<GlobalIndex>
     where
         GetRemappedRecLoc: FnMut(RecordLocation) -> Option<RecordLocation>,
-        GetSegIdx: FnMut(RecordLocation) -> usize, /*seg_idx*/
+        GetSegIdx: FnMut(RecordLocation) -> usize, /*file_idx*/
     {
         let (num_buckets, mut global_index) = self.create_global_index();
         let mut index_block_builder =
             IndexBlockBuilder::new(0, num_buckets + 1, file_id, self.directory.clone()).await?;
 
-        while let Some((hash, old_seg_idx, old_row_idx)) = iter.next() {
+        while let Some((hash, old_file_idx, old_row_idx)) = iter.next() {
             let old_record_location =
-                RecordLocation::DiskFile(global_index.files[old_seg_idx].file_id(), old_row_idx);
+                RecordLocation::DiskFile(global_index.files[old_file_idx].file_id(), old_row_idx);
             if let Some(new_record_location) = get_remapped_record_location(old_record_location) {
                 let new_row_idx = match new_record_location {
                     RecordLocation::DiskFile(_, offset) => offset,
                     _ => panic!("Expected DiskFile variant"),
                 };
-                let new_seg_idx = get_seg_idx(new_record_location);
+                let new_file_idx = get_file_idx(new_record_location);
                 let to_flush =
-                    index_block_builder.write_entry(hash, new_seg_idx, new_row_idx, &global_index);
+                    index_block_builder.write_entry(hash, new_file_idx, new_row_idx, &global_index);
                 if to_flush {
                     index_block_builder.flush().await?;
                 }
@@ -1657,7 +1659,7 @@ impl GlobalIndexBuilder {
         index_blocks.push(index_block_builder.build(&global_index).await?);
         global_index.index_blocks = index_blocks;
 
-        // Now all the (hash, seg_idx, row_idx) points to the new files passed in.
+        // Now all the (hash, file_idx, row_idx) points to the new files passed in.
         global_index.files = new_data_files;
 
         Ok(global_index)
@@ -1745,13 +1747,13 @@ impl<'a> IndexBlockIterator<'a> {
     ///
     /// # Returns
     ///
-    /// * `Some((hash, remapped_seg_idx, row_idx))` - Next entry with remapped file ID
+    /// * `Some((hash, remapped_file_idx, row_idx))` - Next entry with remapped file ID
     /// * `None` - All entries exhausted
     fn next(
         &mut self,
     ) -> Option<(
         u64,   /*hash*/
-        usize, /*seg_idx*/
+        usize, /*file_idx*/
         usize, /*row_idx*/
     )> {
         if self.current_bucket == self.collection.bucket_end_idx - 1 {
@@ -1768,15 +1770,15 @@ impl<'a> IndexBlockIterator<'a> {
                 .unwrap();
             self.current_upper_hash += 1 << self.metadata.hash_lower_bits;
         }
-        let (lower_hash, seg_idx, row_idx) = self
+        let (lower_hash, file_idx, row_idx) = self
             .collection
             .read_entry(&mut self.entry_reader, self.metadata);
         self.current_entry += 1;
-        let seg_idx = self.file_id_remap.get(seg_idx).unwrap();
-        assert_ne!(*seg_idx, INVALID_FILE_ID);
+        let file_idx = self.file_id_remap.get(file_idx).unwrap();
+        assert_ne!(*file_idx, INVALID_FILE_ID);
         Some((
             lower_hash + self.current_upper_hash,
-            *seg_idx as usize,
+            *file_idx as usize,
             row_idx,
         ))
     }
@@ -1793,8 +1795,8 @@ impl<'a> IndexBlockIterator<'a> {
 /// let identity_remap = (0..index.files.len() as u32).collect();
 /// let mut iter = index.create_iterator(&identity_remap);
 ///
-/// while let Some((hash, seg_idx, row_idx)) = iter.next() {
-///     println!("Entry: hash={:x}, file={}, row={}", hash, seg_idx, row_idx);
+/// while let Some((hash, file_idx, row_idx)) = iter.next() {
+///     println!("Entry: hash={:x}, file={}, row={}", hash, file_idx, row_idx);
 /// }
 /// ```
 pub struct GlobalIndexIterator<'a> {
@@ -1831,13 +1833,13 @@ impl<'a> GlobalIndexIterator<'a> {
     ///
     /// # Returns
     ///
-    /// * `Some((hash, seg_idx, row_idx))` - Next entry from any block
+    /// * `Some((hash, file_idx, row_idx))` - Next entry from any block
     /// * `None` - All blocks exhausted
     pub fn next(
         &mut self,
     ) -> Option<(
         u64,   /*hash*/
-        usize, /*seg_idx*/
+        usize, /*file_idx*/
         usize, /*row_idx*/
     )> {
         loop {
@@ -1908,7 +1910,7 @@ pub struct GlobalIndexMergingIterator<'a> {
 struct HeapItem<'a> {
     value: (
         u64,   /*hash*/
-        usize, /*seg_idx*/
+        usize, /*file_idx*/
         usize, /*row_idx*/
     ),
     iter: GlobalIndexIterator<'a>,
@@ -1962,7 +1964,7 @@ impl<'a> GlobalIndexMergingIterator<'a> {
     ///
     /// # Returns
     ///
-    /// * `Some((hash, seg_idx, row_idx))` - Next entry in sorted order
+    /// * `Some((hash, file_idx, row_idx))` - Next entry in sorted order
     /// * `None` - All iterators exhausted
     pub fn next(&mut self) -> Option<(u64, usize, usize)> {
         if let Some(mut heap_item) = self.heap.pop() {
@@ -2014,8 +2016,8 @@ impl IndexBlock {
         write!(f, "\n   Entries: ")?;
         reader.seek_bits(SeekFrom::Start(0)).unwrap();
         for _i in 0..num {
-            let (hash, seg_idx, row_idx) = self.read_entry(&mut reader, metadata);
-            write!(f, "\n     {hash} {seg_idx} {row_idx}")?;
+            let (hash, file_idx, row_idx) = self.read_entry(&mut reader, metadata);
+            write!(f, "\n     {hash} {file_idx} {row_idx}")?;
         }
         write!(f, "\n}}")?;
         Ok(())
@@ -2024,7 +2026,7 @@ impl IndexBlock {
 
 impl Debug for GlobalIndex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "GlobalIndex {{ files: {:?}, num_rows: {}, hash_bits: {}, hash_upper_bits: {}, hash_lower_bits: {}, seg_id_bits: {}, row_id_bits: {}, bucket_bits: {} ", self.files, self.num_rows, self.hash_bits, self.hash_upper_bits, self.hash_lower_bits, self.seg_id_bits, self.row_id_bits, self.bucket_bits)?;
+        write!(f, "GlobalIndex {{ files: {:?}, num_rows: {}, hash_bits: {}, hash_upper_bits: {}, hash_lower_bits: {}, file_id_bits: {}, row_id_bits: {}, bucket_bits: {} ", self.files, self.num_rows, self.hash_bits, self.hash_upper_bits, self.hash_lower_bits, self.file_id_bits, self.row_id_bits, self.bucket_bits)?;
         for block in &self.index_blocks {
             block.fmt(f, self)?;
         }
@@ -2086,15 +2088,14 @@ mod tests {
             .await
             .unwrap();
 
-        // Search for a non-existent key doesn't panic.
         assert!(index
             .search_values(&test_get_hashes_for_index(&[0]))
             .await
             .is_empty());
 
         let data_file_ids = [data_file.file_id()];
-        for (hash, seg_idx, row_idx) in hash_entries.iter() {
-            let expected_record_loc = RecordLocation::DiskFile(data_file_ids[*seg_idx], *row_idx);
+        for (hash, file_idx, row_idx) in hash_entries.iter() {
+            let expected_record_loc = RecordLocation::DiskFile(data_file_ids[*file_idx], *row_idx);
             assert_eq!(
                 index
                     .search_values(&test_get_hashes_for_index(&[*hash]))
@@ -2107,12 +2108,11 @@ mod tests {
         let file_id_remap = vec![0; index.files.len()];
         for block in index.index_blocks.iter() {
             let mut index_block_iter = block.create_iterator(&index, &file_id_remap);
-            while let Some((hash, seg_idx, row_idx)) = index_block_iter.next() {
-                debug!(?hash, seg_idx, row_idx, "index entry");
+            while let Some((hash, file_idx, row_idx)) = index_block_iter.next() {
+                debug!(?hash, file_idx, row_idx, "index entry");
                 hash_entry_num += 1;
             }
         }
-        // Check all hash entries are stored and iterated through via index iterator.
         assert_eq!(hash_entry_num, hash_entries.len());
     }
 
@@ -2161,14 +2161,9 @@ mod tests {
             let RecordLocation::DiskFile(FileId(file_id), _) = pos else {
                 panic!("No record location found for {value}");
             };
-            // Check for the first file indice.
-            // The second batch of data file ids starts with 1.
             if *value < 100 {
                 assert_eq!(*file_id, *value % 3 + 1);
-            }
-            // Check for the second file indice.
-            // The second batch of data file ids starts with 5.
-            else {
+            } else {
                 assert_eq!(*file_id, (*value - 100) % 2 + 5);
             }
         }
