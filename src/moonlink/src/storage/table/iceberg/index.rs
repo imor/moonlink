@@ -28,8 +28,8 @@ pub(crate) struct IndexBlock {
     bucket_start_idx: u32,
     #[serde(rename = "bucket_end_idx")]
     bucket_end_idx: u32,
-    #[serde(rename = "bucket_start_offset")]
-    bucket_start_offset: u64,
+    #[serde(rename = "bucket_array_offset")]
+    bucket_array_offset: u64,
     #[serde(rename = "filepath")]
     pub(crate) filepath: String,
 }
@@ -94,7 +94,7 @@ impl FileIndex {
                 .map(|cur_index_block| IndexBlock {
                     bucket_start_idx: cur_index_block.bucket_start_idx,
                     bucket_end_idx: cur_index_block.bucket_end_idx,
-                    bucket_start_offset: cur_index_block.bucket_start_offset,
+                    bucket_array_offset: cur_index_block.bucket_array_offset,
                     filepath: local_index_file_to_remote
                         .get(cur_index_block.index_file.file_path())
                         .unwrap()
@@ -155,7 +155,7 @@ impl FileIndex {
             let mut cur_index_block = MooncakeIndexBlock::new(
                 cur_index_block.bucket_start_idx,
                 cur_index_block.bucket_end_idx,
-                cur_index_block.bucket_start_offset,
+                cur_index_block.bucket_array_offset,
                 /*index_file=*/
                 create_data_file(cur_file_id, cache_handle.get_cache_filepath().to_string()),
             )
@@ -331,7 +331,7 @@ mod tests {
                 MooncakeIndexBlock::new(
                     /*bucket_start_idx=*/ 0,
                     /*bucket_end_idx=*/ 3,
-                    /*bucket_start_offset=*/ 10,
+                    /*bucket_array_offset=*/ 10,
                     /*index_file=*/
                     create_data_file(/*file_id=*/ 1, local_index_filepath.clone()),
                 )
@@ -417,8 +417,8 @@ mod tests {
             original_mooncake_file_index.index_blocks[0].bucket_end_idx
         );
         assert_eq!(
-            mooncake_file_index.index_blocks[0].bucket_start_offset,
-            original_mooncake_file_index.index_blocks[0].bucket_start_offset
+            mooncake_file_index.index_blocks[0].bucket_array_offset,
+            original_mooncake_file_index.index_blocks[0].bucket_array_offset
         );
     }
 }

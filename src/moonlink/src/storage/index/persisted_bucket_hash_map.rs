@@ -342,7 +342,7 @@ impl Hash for GlobalIndex {
 /// IndexBlock
 /// ├─ bucket_start_idx: 0           # First bucket in this block
 /// ├─ bucket_end_idx: 1000          # Last bucket (exclusive)
-/// ├─ bucket_start_offset: 0        # Bit offset to bucket array
+/// ├─ bucket_array_offset: 0        # Bit offset to bucket array
 /// ├─ index_file: "block_0.idx"     # Physical file
 /// ├─ file_size: 5242880            # File size (for merge decisions)
 /// ├─ data: Some(Mmap)              # Memory-mapped file content
@@ -372,7 +372,7 @@ pub(crate) struct IndexBlock {
     pub(crate) bucket_end_idx: u32,
 
     /// Byte offset where the buckets array starts
-    pub(crate) bucket_start_offset: u64,
+    pub(crate) bucket_array_offset: u64,
 
     /// Local index file path.
     pub(crate) index_file: MooncakeDataFileRef,
@@ -389,17 +389,15 @@ pub(crate) struct IndexBlock {
 }
 
 /// Represents a bucket's hash range and entry positions.
-///
 /// Used during lookup to identify which entries need to be scanned.
-///
-/// # Fields
-///
-/// * `upper_hash` - Upper bits of hash (bucket identifier) shifted to full hash position
-/// * `entry_start` - Index of first entry in this bucket
-/// * `entry_end` - Index after last entry (exclusive)
 struct BucketEntry {
+    /// Upper bits of hash (bucket identifier) shifted to full hash position
     upper_hash: u64,
+
+    /// Index of first entry in this bucket
     entry_start: u32,
+
+    /// Index after last entry (exclusive)
     entry_end: u32,
 }
 
@@ -410,12 +408,12 @@ impl IndexBlock {
     ///
     /// * `bucket_start_idx` - First bucket covered by this block
     /// * `bucket_end_idx` - Last bucket (exclusive) covered by this block
-    /// * `bucket_start_offset` - Bit offset where bucket array starts in file
+    /// * `bucket_array_offset` - Bit offset where bucket array starts in file
     /// * `index_file` - Reference to the index block file
     pub(crate) async fn new(
         bucket_start_idx: u32,
         bucket_end_idx: u32,
-        bucket_start_offset: u64,
+        bucket_array_offset: u64,
         index_file: MooncakeDataFileRef,
     ) -> Self {
         let file = tokio::fs::File::open(index_file.file_path()).await.unwrap();
@@ -425,7 +423,7 @@ impl IndexBlock {
         Self {
             bucket_start_idx,
             bucket_end_idx,
-            bucket_start_offset,
+            bucket_array_offset,
             index_file,
             file_size: file_metadata.len(),
             data: Arc::new(Some(data)),
@@ -472,7 +470,7 @@ impl IndexBlock {
         for bucket_idx in bucket_idxs {
             reader
                 .seek_bits(SeekFrom::Start(
-                    self.bucket_start_offset + (bucket_idx * global_index.bucket_bits) as u64,
+                    self.bucket_array_offset + (bucket_idx * global_index.bucket_bits) as u64,
                 ))
                 .unwrap();
             let start = reader
@@ -1182,7 +1180,7 @@ impl IndexBlockBuilder {
         for i in self.current_bucket + 1..self.bucket_end_idx {
             self.buckets[i as usize] = self.current_entry;
         }
-        let bucket_start_offset = (self.current_entry as u64)
+        let bucket_array_offset = (self.current_entry as u64)
             * (metadata.hash_lower_bits + metadata.file_id_bits + metadata.row_id_bits) as u64;
         let buckets = std::mem::take(&mut self.buckets);
         for cur_bucket in buckets {
@@ -1196,7 +1194,7 @@ impl IndexBlockBuilder {
         Ok(IndexBlock::new(
             self.bucket_start_idx,
             self.bucket_end_idx,
-            bucket_start_offset,
+            bucket_array_offset,
             self.index_file,
         )
         .await)
@@ -1674,27 +1672,32 @@ impl GlobalIndexBuilder {
 ///
 /// Sequentially reads entries from an index block, applying file ID
 /// remapping during iteration.
-///
-/// # Structure
-///
-/// ```text
-/// IndexBlockIterator
-/// ├─ collection: &IndexBlock        # Index block being iterated
-/// ├─ current_bucket: 5              # Currently reading bucket 5
-/// ├─ current_entry: 50              # On entry 50
-/// ├─ bucket_reader: BitReader       # Reads bucket offsets
-/// ├─ entry_reader: BitReader        # Reads hash entries
-/// └─ file_id_remap: [0→0, 1→3]     # Remap file IDs during iteration
-/// ```
 struct IndexBlockIterator<'a> {
+    /// Reference to the index block being iterated
     collection: &'a IndexBlock,
+
+    /// Global index metadata containing bit width information for decoding entries
     metadata: &'a GlobalIndex,
+
+    /// Index of the bucket currently being read
     current_bucket: u32,
+
+    /// Entry index marking the end of entries in the current bucket (exclusive)
     current_bucket_entry_end: u32,
+
+    /// Current entry index within the entire index block
     current_entry: u32,
+
+    /// Upper hash bits for the current bucket, used when reconstructing full hash
     current_upper_hash: u64,
+
+    /// Bit reader for reading bucket offsets from the bucket array section
     bucket_reader: BitReader<Cursor<&'a [u8]>, BigEndian>,
+
+    /// Bit reader for reading individual hash entries from the entries section
     entry_reader: BitReader<Cursor<&'a [u8]>, BigEndian>,
+
+    /// Mapping from old file IDs to new file IDs, applied during iteration
     file_id_remap: &'a Vec<u32>,
 }
 
@@ -1719,7 +1722,7 @@ impl<'a> IndexBlockIterator<'a> {
         );
         let entry_reader = bucket_reader.clone();
         bucket_reader
-            .seek_bits(SeekFrom::Start(collection.bucket_start_offset))
+            .seek_bits(SeekFrom::Start(collection.bucket_array_offset))
             .unwrap();
         let _ = bucket_reader
             .read_unsigned_var::<u32>(global_index.bucket_bits)
@@ -2005,7 +2008,7 @@ impl IndexBlock {
         write!(f, "\n   Buckets: ")?;
         let mut num = 0;
         reader
-            .seek_bits(SeekFrom::Start(self.bucket_start_offset))
+            .seek_bits(SeekFrom::Start(self.bucket_array_offset))
             .unwrap();
         for _i in 0..self.bucket_end_idx {
             num = reader

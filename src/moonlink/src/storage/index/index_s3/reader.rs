@@ -87,16 +87,16 @@ pub(crate) async fn fetch_bucket_entries(
     }
 
     // Get bucket boundaries from directory
-    let bucket_start_offset = metadata.bucket_directory[bucket_idx as usize].entry_offset;
+    let bucket_array_offset = metadata.bucket_directory[bucket_idx as usize].entry_offset;
     let bucket_end_offset = metadata.bucket_directory[bucket_idx as usize + 1].entry_offset;
 
     // Empty bucket
-    if bucket_start_offset == bucket_end_offset {
+    if bucket_array_offset == bucket_end_offset {
         return Ok(Vec::new());
     }
 
     // Calculate absolute byte range
-    let abs_start = metadata.header.entry_block_offset + bucket_start_offset;
+    let abs_start = metadata.header.entry_block_offset + bucket_array_offset;
     let abs_end = metadata.header.entry_block_offset + bucket_end_offset;
 
     // Fetch entry data
@@ -173,11 +173,7 @@ pub(crate) struct SharedIndexReader {
 
 impl SharedIndexReader {
     /// Create a new shared reader.
-    pub fn new(
-        s3_key: String,
-        s3_client: Arc<dyn S3Client>,
-        cache: S3IndexCache,
-    ) -> Self {
+    pub fn new(s3_key: String, s3_client: Arc<dyn S3Client>, cache: S3IndexCache) -> Self {
         Self {
             s3_key,
             s3_client,
@@ -258,13 +254,8 @@ impl SharedIndexReader {
         let entries = {
             let guard = self.metadata.read().await;
             let metadata = guard.as_ref().unwrap();
-            fetch_bucket_entries(
-                self.s3_client.as_ref(),
-                &self.s3_key,
-                metadata,
-                bucket_idx,
-            )
-            .await?
+            fetch_bucket_entries(self.s3_client.as_ref(), &self.s3_key, metadata, bucket_idx)
+                .await?
         };
 
         // Cache the result
