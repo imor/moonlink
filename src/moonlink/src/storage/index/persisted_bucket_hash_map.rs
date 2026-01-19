@@ -235,21 +235,6 @@ pub(super) fn splitmix64(mut x: u64) -> u64 {
 /// A `GlobalIndex` provides O(1) average-case lookup of records across one or more
 /// Parquet data files using a bucket-based hash table stored on disk.
 ///
-/// # Structure
-///
-/// ```text
-/// GlobalIndex
-/// ├─ files: Vec<DataFile>          # Parquet files indexed
-/// ├─ num_rows: u32                  # Total rows across all files
-/// ├─ hash_bits: u32                 # Total hash bits (always 64)
-/// ├─ hash_upper_bits: u32           # Bits for bucket index
-/// ├─ hash_lower_bits: u32           # Bits stored in entries
-/// ├─ file_id_bits: u32               # Bits for file index
-/// ├─ row_id_bits: u32               # Bits for row index
-/// ├─ bucket_bits: u32               # Bits for bucket offsets
-/// └─ index_blocks: Vec<IndexBlock>  # Physical index files
-/// ```
-///
 /// # Example: Small Index
 ///
 /// ```rust,ignore
@@ -301,15 +286,41 @@ pub(super) fn splitmix64(mut x: u64) -> u64 {
 /// ```
 #[derive(Clone)]
 pub struct GlobalIndex {
+    /// Parquet data files indexed by this hash index.
     pub(crate) files: Vec<MooncakeDataFileRef>,
+
+    /// Total number of rows across all indexed files.
     pub(crate) num_rows: u32,
+
+    /// Total hash bits (always 64). The hash is split into upper bits (for bucket
+    /// index) and lower bits (stored in entries for verification).
     pub(crate) hash_bits: u32,
+
+    /// Number of bits used for bucket index calculation. Determines the maximum
+    /// number of possible buckets (2^hash_upper_bits).
     pub(crate) hash_upper_bits: u32,
+
+    /// Number of bits stored in each entry for hash verification. Together with
+    /// hash_upper_bits, these make up the full 64-bit hash (hash_upper_bits +
+    /// hash_lower_bits = hash_bits).
     pub(crate) hash_lower_bits: u32,
+
+    /// Number of bits needed to represent file indices. Calculated as
+    /// ceil(log2(num_files)). Limits the maximum number of files that can be indexed.
     pub(crate) file_id_bits: u32,
+
+    /// Number of bits needed to represent row indices within a file. Calculated as
+    /// ceil(log2(max_rows_per_file)). Limits the maximum number of rows per file.
     pub(crate) row_id_bits: u32,
+
+    /// Number of bits needed to represent bucket entry counts. Calculated as
+    /// ceil(log2(max_entries_per_bucket)). Used to store the number of entries
+    /// in each bucket.
     pub(crate) bucket_bits: u32,
 
+    /// Physical index blocks on disk. Large indices are split across multiple
+    /// blocks for parallel access, cache efficiency, and incremental updates.
+    /// Each block covers a range of bucket indices.
     pub(crate) index_blocks: Vec<IndexBlock>,
 }
 
