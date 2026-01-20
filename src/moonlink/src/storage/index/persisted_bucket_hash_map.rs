@@ -728,6 +728,7 @@ impl GlobalIndex {
             .map(|cur_index_block| cur_index_block.file_size)
             .sum()
     }
+
     /// Search for multiple values efficiently in a single pass.
     ///
     /// More efficient than repeated single lookups because it:
